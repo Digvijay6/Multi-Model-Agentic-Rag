@@ -66,21 +66,21 @@ async def fetch_caption(session, url, headers, payload, page, page_img_path):
         return {"page_number": page, "caption": f"Error: {e}", "page_img_path": page_img_path}
 
 
-if __name__ == "__main__":
-    import os, asyncio, base64
-
-    async def test():
-        api_key = os.getenv("GOOGLE_API_KEY", "AIzaSyAaCu_id4omLOkxhYNyY3X4OYVGHXtijk0")
-        if not api_key:
-            print("❌ Missing GOOGLE_API_KEY.")
-            return
-
-        # dummy 1x1 PNG
-        dummy_png_bytes = base64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
-        )
-        image_info_list = [{"image": dummy_png_bytes, "page_number": 1, "source" : "test", "page_img_path": "/test/1.png"}]
-        captions = await caption_images_via_gemini(image_info_list, api_key)
-        print(captions[0].keys())
-
-    asyncio.run(test())
+# if __name__ == "__main__":
+#     import os, asyncio, base64
+#
+#     async def test():
+#         api_key = os.getenv("GOOGLE_API_KEY", "")
+#         if not api_key:
+#             print("❌ Missing GOOGLE_API_KEY.")
+#             return
+#
+#         # dummy 1x1 PNG
+#         dummy_png_bytes = base64.b64decode(
+#             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+#         )
+#         image_info_list = [{"image": dummy_png_bytes, "page_number": 1, "source" : "test", "page_img_path": "/test/1.png"}]
+#         captions = await caption_images_via_gemini(image_info_list, api_key)
+#         print(captions[0].keys())
+#
+#     asyncio.run(test())
