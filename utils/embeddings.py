@@ -11,30 +11,13 @@ load_dotenv()
 client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-async def get_openai_embeddings_batch(texts: List[str]) -> List[List[float]]:
+async def get_openai_embeddings_batch(texts: List[str], model: str = "text-embedding-3-small") -> List[List[float]]:
     """
-    Generates embeddings for a batch of texts using OpenAI's async API.
-
-    Args:
-        texts: A list of strings to embed.
-
-    Returns:
-        A list of embeddings, where each embedding is a list of floats.
+    Create embeddings for a batch of texts using OpenAI async client.
     """
-    if not texts:
-        return []
-
     try:
-        # The API is optimized for batching. This is much faster.
-        response = await client.embeddings.create(
-            model="text-embedding-3-small",
-            input=texts
-        )
-
-        # Extract the embedding vectors from the response
+        response = await client.embeddings.create(input=texts, model=model)
         return [item.embedding for item in response.data]
-
     except Exception as e:
-        print(f"An error occurred while generating embeddings in batch: {e}")
-        # In a real app, you might want more sophisticated error handling
-        return [[] for _ in texts]  # Return empty lists on failure
+        print(f"[ERROR] Embedding creation failed: {e}")
+        return []

@@ -1,4 +1,5 @@
 import asyncio, os, time, threading
+from collections import defaultdict
 import httpx
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, Body
 from dotenv import load_dotenv
@@ -58,25 +59,58 @@ async def upload_pdf(file: UploadFile = File(...)):
         content = await file.read()
         f.write(content)
 
-    text, images = await extract_text_and_images(file_path)
+    full_text, embedded_images, page_texts = await extract_text_and_images(file_path)
+    print(f"[INFO] Extracted {len(page_texts)} pages and {len(embedded_images)} embedded images.")
 
     captions = []
-    if images:
-        captions = caption_images_via_gemini(images, os.getenv("GEMINI_API_KEY"))
+    if embedded_images:
+        captions = await caption_images_via_gemini(embedded_images, os.getenv("GEMINI_API_KEY"))
+        print(f"[INFO] Generated {len(captions)} image captions.")
 
-    chunks = semantic_chunk_text(text)
+    # Build caption map (allow multiple per page)
+    caption_map = defaultdict(list)
+    for c in captions:
+        caption_map[c["page_number"]].append(c["caption"])
+
+    embeddings_to_upsert = []
+    total_chunks = 0
+    for page in page_texts:
+        page_chunks = semantic_chunk_text(page["text"])
+        total_chunks += len(page_chunks)
+        page_num = page["page_number"]
+        page_captions = caption_map.get(page_num, [])
+        page_img_path = page.get("page_img_path")
+
+        for chunk in page_chunks:
+            embeddings_to_upsert.append({
+                "text": chunk,
+                "metadata": {
+                    "page_number": page_num,
+                    "caption": page_captions,
+                    "source": file.filename,
+                    "page_img_path": page_img_path
+                }
+            })
+
+    captions_for_upsert = [
+        {"page": c["page_number"], "caption": c["caption"], "page_img_path": c["page_img_path"]}
+        for c in captions
+    ]
 
     await upsert_documents_to_pinecone(
         pc_async_client=pc_async,
         pinecone_index_name=PINECONE_INDEX_NAME,
-        chunks=chunks,
-        captions=captions
+        chunks=embeddings_to_upsert,
+        captions=captions_for_upsert,
+        file_name=file.filename,
     )
 
     return {
-        "text": text,
+        "filename": file.filename,
+        "num_pages": len(page_texts),
+        "num_images": len(embedded_images),
+        "num_chunks": total_chunks,
         "image_captions": captions,
-        "num_images": len(images),
         "status": "success"
     }
 

@@ -1,77 +1,72 @@
-import uuid
 from typing import List, Dict, Any
-from pinecone import Pinecone as PineconeSync  # Import sync version for utility tasks if needed
-from pinecone.grpc import PineconeGRPC as PineconeAsync  # Main async client
 
 # Use a relative import to get our new async embedding function
 from .embeddings import get_openai_embeddings_batch
 
 
 async def upsert_documents_to_pinecone(
-        pc_async_client: PineconeAsync,
-        pinecone_index_name: str,
-        chunks: List[str],
-        captions: List[Dict[str, Any]]  # Expecting [{'text': caption, 'page': num}]
+    pc_async_client,
+    pinecone_index_name: str,
+    chunks: List[Dict[str, Any]],
+    captions: List[Dict[str, Any]],
+    file_name: str = None,
 ):
     """
-    Embeds and upserts document chunks and image captions to Pinecone asynchronously.
-
-    Args:
-        pc_async_client: An initialized PineconeGRPC (async) client instance.
-        pinecone_index_name: The name of the target Pinecone index.
-        chunks: A list of text chunks from the document.
-        captions: A list of dictionaries, each with caption text and page number.
+    Embed text chunks + captions and upsert to Pinecone with detailed metadata.
+    Metadata includes:
+        - type: text or image_caption
+        - source: file name
+        - page_number
+        - page_img_path
+        - caption text (if any)
     """
-    print("Starting document and caption upsert process...")
+    index = pc_async_client.Index(pinecone_index_name)
 
-    # 1. Combine all text content for efficient batch embedding
-    texts_to_embed = chunks + [caption for caption in captions]
-
-    if not texts_to_embed:
-        print("No text or captions to upsert.")
-        return
-
-    # 2. Get all embeddings in a single, fast API call
-    print(f"Generating embeddings for {len(texts_to_embed)} items in a single batch...")
-    all_embeddings = await get_openai_embeddings_batch(texts_to_embed)
-
-    # 3. Prepare vectors in the new SDK format: a list of dictionaries
     vectors_to_upsert = []
 
-    # Process text chunks
-    for i, chunk in enumerate(chunks):
-        if all_embeddings[i]:  # Check if embedding was successful
+    # Embed text chunks
+    if chunks:
+        chunk_texts = [d["text"] for d in chunks]
+        print(f"[INFO] Creating embeddings for {len(chunk_texts)} text chunks...")
+        embeddings = await get_openai_embeddings_batch(chunk_texts)
+        for i, chunk in enumerate(chunks):
+            meta = chunk.get("metadata", {})
+            meta = {
+                "type": "text",
+                "source": meta.get("source", file_name),
+                "page_number": meta.get("page_number"),
+                "text": chunk["text"],
+                "page_img_path": meta.get("page_img_path")
+            }
             vectors_to_upsert.append({
-                "id": f"chunk_{uuid.uuid4()}",
-                "values": all_embeddings[i],
-                "metadata": {"type": "text", "text": chunk}
+                "id": f"{file_name}_text_{i}",
+                "values": embeddings[i],
+                "metadata": meta
             })
 
-    # Process image captions
-    chunk_count = len(chunks)
-    print(captions)
-    for i, caption_data in enumerate(captions):
-        print(caption_data)
-        embedding_index = chunk_count + i
-        if all_embeddings[embedding_index]:  # Check embedding
+    # Embed image captions
+    if captions:
+        caption_texts = [c["caption"] for c in captions]
+        print(f"[INFO] Creating embeddings for {len(caption_texts)} image captions...")
+        caption_embeddings = await get_openai_embeddings_batch(caption_texts)
+        for i, c in enumerate(captions):
+            meta = {
+                "type": "image_caption",
+                "source": file_name,
+                "page_number": c.get("page"),
+                "caption": c["caption"],
+                "page_img_path": c.get("page_img_path")
+            }
             vectors_to_upsert.append({
-                "id": f"caption_{uuid.uuid4()}",
-                "values": all_embeddings[embedding_index],
-                "metadata": {
-                    "type": "image_caption",
-                    "text": caption_data
-                }
+                "id": f"{file_name}_caption_{i}",
+                "values": caption_embeddings[i],
+                "metadata": meta
             })
-    # 4. Connect to the index and upsert asynchronously
-    if not vectors_to_upsert:
-        print("No valid vectors were generated to upsert.")
-        return
-    try:
-        print(f"Connecting to index '{pinecone_index_name}' and upserting {len(vectors_to_upsert)} vectors...")
-        index = pc_async_client.Index(pinecone_index_name)
-        # upsert the vectors to Pinecone
-        index.upsert(vectors=vectors_to_upsert, batch_size=100)
 
-        print("Successfully upserted vectors to Pinecone.")
-    except Exception as e:
-        print(f"An error occurred during Pinecone upsert: {e}")
+    # Upsert everything
+    if vectors_to_upsert:
+        print(f"[INFO] Upserting {len(vectors_to_upsert)} vectors with metadata into Pinecone index: {pinecone_index_name}")
+        index.upsert(vectors=vectors_to_upsert)
+        print("[INFO] ✅ Upsert complete.")
+    else:
+        print("[WARN] ⚠️ No data to upsert.")
