@@ -67,6 +67,6 @@ async def upsert_documents_to_pinecone(
     if vectors_to_upsert:
         print(f"[INFO] Upserting {len(vectors_to_upsert)} vectors with metadata into Pinecone index: {pinecone_index_name}")
         index.upsert(vectors=vectors_to_upsert)
-        print("[INFO] ✅ Upsert complete.")
+        print("[INFO] Upsert complete.")
     else:
-        print("[WARN] ⚠️ No data to upsert.")
+        print("[WARN] No data to upsert.")

@@ -2,6 +2,7 @@ import asyncio, os, time, threading
 from collections import defaultdict
 import httpx
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, Body
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 
@@ -20,7 +21,8 @@ from pinecone import Pinecone
 from deepgram import DeepgramClient
 from deepgram.core.events import EventType
 from deepgram.extensions.types.sockets import ListenV1SocketClientResponse
-
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 load_dotenv()
 
@@ -47,6 +49,30 @@ if not DEEPGRAM_API_KEY:
 deepgram_client = DeepgramClient(api_key=DEEPGRAM_API_KEY)
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8002",
+        "http://127.0.0.1:8002",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:8001",
+        "http://127.0.0.1:8001",
+        "http://localhost:63342",  # JetBrains / VSCode live preview
+        "http://127.0.0.1:5500",   # VSCode Live Server
+        "*",  # (optional — use only for testing; don't keep in production)
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+async def serve_frontend():
+    return FileResponse("index.html")
 
 
 @app.post("/upload")
@@ -122,7 +148,7 @@ async def ask_a_question(
     Accepts a text query and returns the RAG answer from Pinecone + LLM.
     """
     try:
-        print(f"[INFO] 🧠 Received query: {query}")
+        print(f"[INFO] Received query: {query}")
         result = await run_rag_agent(query, pinecone_index)
         return {"RAG Answer": result}
 
@@ -175,7 +201,7 @@ async def audio_stream(websocket: WebSocket):
     prints their size, and writes them to a .wav file for validation.
     """
     await websocket.accept()
-    print("\n[INFO] 🔊 Client connected to /audio WebSocket")
+    print("\n[INFO] Client connected to /audio WebSocket")
 
     # Prepare file to write incoming audio
     os.makedirs("temp_audio", exist_ok=True)
@@ -189,28 +215,28 @@ async def audio_stream(websocket: WebSocket):
                     print(f"[INFO] Received {len(data)} bytes of audio.")
                     f.write(data)
                 except WebSocketDisconnect:
-                    print("[INFO] ❌ Client disconnected.")
+                    print("[INFO] Client disconnected.")
                     break
                 except Exception as e:
                     print(f"[ERROR] WebSocket error: {e}")
                     break
 
-        print(f"[INFO] ✅ Audio stream saved to: {output_path}")
+        print(f"[INFO] Audio stream saved to: {output_path}")
 
     finally:
-        # ✅ only close if connection is still active
+        # only close if connection is still active
         try:
             if websocket.application_state.value == 2:  # CONNECTED
                 await websocket.close()
         except RuntimeError:
             pass
-        print("[INFO] 🔒 WebSocket connection cleanup done.")
+        print("[INFO] WebSocket connection cleanup done.")
 
 
 @app.websocket("/listen")
 async def listen_websocket(websocket: WebSocket):
     await websocket.accept()
-    print("\n[INFO] 🎧 Client connected to /listen WebSocket")
+    print("\n[INFO] Client connected to /listen WebSocket")
 
     deepgram: DeepgramClient = DeepgramClient()
     loop = asyncio.get_running_loop()
@@ -250,7 +276,7 @@ async def listen_websocket(websocket: WebSocket):
                     is_final = getattr(message, "is_final", False)
 
                     if is_final:
-                        print(f"[Deepgram ✅ Final]: {transcript}")
+                        print(f"[Deepgram Final]: {transcript}")
 
                         # Run RAG agent on the final transcript
                         async def rag_task():
@@ -260,7 +286,7 @@ async def listen_websocket(websocket: WebSocket):
                                     "type": "rag_answer",
                                     "data": rag_result
                                 })
-                                print(f"[RAG 🧠]: {rag_result}")
+                                print(f"[RAG]: {rag_result}")
                             except Exception as e:
                                 print(f"[ERROR] RAG agent error: {e}")
                                 await websocket.send_json({
@@ -293,7 +319,7 @@ async def listen_websocket(websocket: WebSocket):
         thread_dg = threading.Thread(target=listening_thread, daemon=True)
         thread_dg.start()
 
-        print("[INFO] 🟢 Ready to receive audio from client.")
+        print("[INFO] Ready to receive audio from client.")
 
         try:
             while True:
@@ -306,7 +332,7 @@ async def listen_websocket(websocket: WebSocket):
                 lock_exit.release()
                 connection.send_media(data)
         except WebSocketDisconnect:
-            print("[INFO] ❌ Frontend disconnected.")
+            print("[INFO] Frontend disconnected.")
         except Exception as e:
             print(f"[ERROR] {e}")
 
@@ -316,7 +342,7 @@ async def listen_websocket(websocket: WebSocket):
         lock_exit.release()
 
         try:
-            # ✅ check before closing
+            # check before closing
             if connection and not getattr(connection, "_closed", True):
                 connection.finish()
         except Exception as e:
@@ -327,6 +353,6 @@ async def listen_websocket(websocket: WebSocket):
         except Exception:
             pass
 
-        print("[INFO] 🔒 Connection cleanup done.")
+        print("[INFO] Connection cleanup done.")
 
 

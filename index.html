@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voice-Enabled Multi-Modal RAG Chatbot</title>
+  <style>
+    body {
+      font-family: "Inter", sans-serif;
+      background: #fafafa;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      margin-top: 20px;
+      color: #333;
+    }
+
+    #chat-container {
+      width: 90%;
+      max-width: 800px;
+      height: 70vh;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      overflow-y: auto;
+      padding: 16px;
+      margin-top: 20px;
+    }
+
+    .message {
+      margin: 12px 0;
+      padding: 12px;
+      border-radius: 8px;
+      line-height: 1.4;
+    }
+
+    .user {
+      background: #e6f0ff;
+      align-self: flex-end;
+    }
+
+    .bot {
+      background: #f4f4f4;
+    }
+
+    #controls {
+      display: flex;
+      gap: 10px;
+      margin: 20px 0;
+      justify-content: center;
+    }
+
+    #micBtn {
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+
+    #micBtn.recording {
+      background: #d9534f;
+    }
+
+    #uploadBtn {
+      padding: 8px 12px;
+    }
+
+    #questionInput {
+      width: 60%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+    }
+
+    .citations {
+      margin-top: 8px;
+      padding: 8px;
+      background: #f8f8ff;
+      border-left: 3px solid #888;
+      font-size: 0.9em;
+    }
+
+    .citations ul {
+      list-style: none;
+      padding-left: 0;
+    }
+
+    .citations li {
+      margin: 6px 0;
+    }
+
+    .citation-image {
+      margin-top: 6px;
+      width: 100%;
+      max-width: 250px;
+      border-radius: 8px;
+      box-shadow: 0 0 3px rgba(0, 0, 0, 0.2);
+    }
+  </style>
+</head>
+<body>
+  <h1>🎙️ AI Voice + RAG Chatbot</h1>
+
+  <div id="controls">
+    <input type="file" id="pdfUpload" accept=".pdf" />
+    <button id="uploadBtn">Upload PDF</button>
+  </div>
+
+  <div id="controls">
+    <input id="questionInput" placeholder="Ask a question..." />
+    <button id="askBtn">Ask</button>
+    <button id="micBtn">🎤 Start Listening</button>
+  </div>
+
+  <div id="chat-container"></div>
+
+  <script>
+    const chatContainer = document.getElementById("chat-container");
+    const micBtn = document.getElementById("micBtn");
+    const askBtn = document.getElementById("askBtn");
+
+    let ws = null;
+    let mediaRecorder = null;
+
+    // ✅ Append message to chat (with citations support)
+    function appendMessage(sender, message, citations = []) {
+      const msgDiv = document.createElement("div");
+      msgDiv.classList.add("message", sender);
+
+      let html = `<strong>${sender === "user" ? "🧑 You" : "🤖 Bot"}:</strong> ${message}`;
+
+      if (citations.length > 0) {
+        html += `<div class="citations"><strong>📚 Citations:</strong><ul>`;
+        citations.forEach((c) => {
+          if (c.Source) {
+            html += `<li><a href="${c.Source}" target="_blank">${c.Source}</a></li>`;
+          } else if (c.page && c.image) {
+            html += `<li>Page ${c.page}<br><img src="http://localhost:8002/${c.image}" class="citation-image" /></li>`;
+          } else if (c.page) {
+            html += `<li>Page ${c.page}</li>`;
+          }
+        });
+        html += `</ul></div>`;
+      }
+
+      msgDiv.innerHTML = html;
+      chatContainer.appendChild(msgDiv);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    // ---------------- PDF UPLOAD ----------------
+    document.getElementById("uploadBtn").onclick = async () => {
+      const file = document.getElementById("pdfUpload").files[0];
+      if (!file) return alert("Please select a PDF.");
+
+      appendMessage("bot", "📤 Uploading and processing your document...");
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("http://localhost:8002/upload", { method: "POST", body: formData });
+      const data = await res.json();
+
+      appendMessage("bot", `✅ Uploaded <b>${data.filename}</b> with ${data.num_pages} pages and ${data.num_images} images.`);
+    };
+
+    // ---------------- TEXT QUESTION ----------------
+    askBtn.onclick = async () => {
+      const query = document.getElementById("questionInput").value.trim();
+      if (!query) return;
+
+      appendMessage("user", query);
+
+      const response = await fetch("http://localhost:8002/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+
+      const data = await response.json();
+      const rag = data["RAG Answer"] || {};
+      appendMessage("bot", rag.answer || "I couldn't find an answer.", rag.citations || []);
+    };
+
+    // ---------------- MICROPHONE STREAM ----------------
+    micBtn.onclick = async () => {
+      if (micBtn.classList.contains("recording")) {
+        // Stop recording gracefully
+        micBtn.classList.remove("recording");
+        micBtn.textContent = "🎤 Start Listening";
+        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
+
+        setTimeout(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            console.log("[WS] closing connection...");
+            ws.close(1000, "User stopped recording");
+          }
+        }, 1000);
+        return;
+      }
+
+      // Start new recording
+      micBtn.classList.add("recording");
+      micBtn.textContent = "🛑 Stop Listening";
+
+      ws = new WebSocket(`ws://${window.location.hostname}:8002/listen`);
+      ws.binaryType = "arraybuffer";
+
+      ws.onopen = async () => {
+        console.log("[WS] connected to /listen");
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+
+          mediaRecorder.addEventListener("dataavailable", async (e) => {
+            if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+              const buf = await e.data.arrayBuffer();
+              ws.send(buf);
+            }
+          });
+
+          mediaRecorder.start(250);
+        } catch (err) {
+          console.error("[Mic] error:", err);
+          appendMessage("bot", "⚠️ Unable to access microphone.");
+        }
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "transcript") {
+          appendMessage("user", msg.data);
+        } else if (msg.type === "rag_answer") {
+          appendMessage("bot", msg.data.answer, msg.data.citations);
+        } else if (msg.type === "rag_error") {
+          appendMessage("bot", "⚠️ Error: " + msg.data);
+        }
+      };
+
+      ws.onclose = (e) => {
+        console.log(`[WS] closed (${e.code}): ${e.reason}`);
+        micBtn.classList.remove("recording");
+        micBtn.textContent = "🎤 Start Listening";
+      };
+
+      ws.onerror = (err) => {
+        console.error("[WS] error:", err);
+      };
+    };
+  </script>
+</body>
+</html>

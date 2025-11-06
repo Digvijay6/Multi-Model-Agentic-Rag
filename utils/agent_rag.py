@@ -37,7 +37,25 @@ def web_search(query: str) -> str:
     try:
         r = serper_search.results(query)
         organic = r.get("organic", [])
-        return "\n".join(f"- {o.get('snippet','')}" for o in organic[:4]) or "no hits"
+        context_snippets = []
+
+        for o in organic[:3]:
+            title = o.get("title", "Untitled")
+            snippet = o.get("snippet", "")
+            link = o.get("link", "")
+            date = o.get("date", "")
+
+            #Markdown-friendly formatting for citations
+            formatted_snippet = (
+                f"**{title}** ({date})\n"
+                f"{snippet}\n"
+                f"[Source]({link})"
+            )
+
+            context_snippets.append(formatted_snippet)
+
+        return "\n\n---\n\n".join(context_snippets), link
+
     except Exception as e:
         print("serper error:", e)
         return "search error"
@@ -46,18 +64,21 @@ def web_search(query: str) -> str:
 # --- Router ---
 async def router(query: str) -> str:
     prompt = f"""
-You are a tool router. 
-Decide which source to use for this query.
+You are a smart query router.
 
-If the question likely refers to the uploaded document or a report, choose:
-"pinecone_search"
+Decide which tool to use to best answer the query:
 
-If it is general world knowledge, choose:
-"web_search"
+- Use "pinecone_search" if the user refers to the uploaded document, research paper, or anything that sounds like a report, model, results, accuracy, analysis, figure, dataset, etc.
+- Use "web_search" if the question is general knowledge, news, or external info not likely inside the uploaded document.
 
-Only reply with one of the two tokens.
+Examples:
+Q: What accuracy did the paper achieve? → pinecone_search
+Q: Who created GPT-4? → web_search
+Q: What is AIRA's model about? → pinecone_search
+Q: Latest news about OpenAI? → web_search
 
-Query: {query}
+Now classify:
+{query}
 """
     r = await llm.ainvoke([{"role": "user", "content": prompt}])
     return r.content.strip().lower()
@@ -66,16 +87,20 @@ Query: {query}
 # --- Answer Synthesizer ---
 async def answer_synthesizer(query: str, context: str) -> str:
     prompt = f"""
-You are a helpful AI assistant. Use the context below to answer the question.
-If the answer is not present in the context, say: "I cannot find it in the sources."
+You are a research assistant. Use only the context below to answer as accurately as possible.
+
+If the information seems relevant but incomplete, make a **concise best-effort summary** instead of refusing.
 
 Context:
 {context}
 
 Question: {query}
+
+Answer directly and include page or source hints if available.
 """
     r = await llm.ainvoke([{"role": "user", "content": prompt}])
-    return r.content
+    return r.content.strip()
+
 
 
 # --- Main RAG Agent ---
@@ -109,7 +134,10 @@ async def run_rag_agent(query: str, pinecone_index) -> Dict[str, Any]:
                 seen_pages.add(page_num)
 
     elif "web" in tool:
-        context = web_search(query)
+        context, link = web_search(query)
+        citations.append({
+        "Source": link
+        })
 
     else:
         context = "router_error"

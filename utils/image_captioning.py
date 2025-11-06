@@ -72,7 +72,7 @@ async def fetch_caption(session, url, headers, payload, page, page_img_path):
 #     async def test():
 #         api_key = os.getenv("GOOGLE_API_KEY", "")
 #         if not api_key:
-#             print("❌ Missing GOOGLE_API_KEY.")
+#             print("Missing GOOGLE_API_KEY.")
 #             return
 #
 #         # dummy 1x1 PNG
