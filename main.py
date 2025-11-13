@@ -6,14 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 
-# utils (your existing modules)
 from utils.pdf_extractor import extract_text_and_images
 from utils.image_captioning import caption_images_via_gemini
 from utils.semantic_chunker import semantic_chunk_text
 from utils.pinecone_utils import upsert_documents_to_pinecone
 from utils.agent_rag import run_rag_agent
 
-# Pinecone async grpc client you were using
 from pinecone.grpc import PineconeGRPC as PineconeAsync
 from pinecone import Pinecone
 
@@ -71,6 +69,10 @@ app.add_middleware(
 os.makedirs("static", exist_ok=True)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/favicon.png")
+async def favicon():
+    return FileResponse("favicon.png")
 
 @app.get("/")
 async def serve_frontend():
